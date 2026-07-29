@@ -90,6 +90,11 @@
     $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     $$('.tabpane').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
     if (name === 'export') refreshSource();
+    if (name === 'fabinate') {
+      // lazy-load the Drive player the first time the tab is opened
+      const v = $('#fabinateVideo');
+      if (v && !v.src) v.src = v.dataset.src;
+    }
   }
 
   // ------------------------------------------------------------------ scanning
