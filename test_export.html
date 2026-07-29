@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>export path test</title></head>
+<body>
+<pre id="out">STARTING</pre>
+<script src="lib/ffmpeg/ffmpeg.js"></script>
+<script src="lib/ffmpeg/util.js"></script>
+<script src="core.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const out = document.getElementById('out');
+  const lines = [];
+  const say = (s) => { lines.push(s); out.textContent = lines.join('\n'); };
+  try {
+    const C = window.FabCore;
+    say('fetching 10 test frames…');
+    const files = [];
+    for (let i = 0; i < 10; i++) {
+      const name = C.seqName(i, 'bmp');
+      const r = await fetch('test_assets/' + name);
+      if (!r.ok) throw new Error('missing test asset ' + name);
+      const b = await r.blob();
+      files.push(new File([b], name, { type: 'image/bmp' }));
+    }
+    say('frames fetched: ' + files.length + ' (' + files[0].size + ' bytes each)');
+
+    const { FFmpeg } = FFmpegWASM;
+    const { toBlobURL } = FFmpegUtil;
+    const ff = new FFmpeg();
+    let lastFrame = 0;
+    const ring = [];
+    const encs = new Set();
+    let probing = false;
+    ff.on('log', (ev) => {
+      ring.push(ev.message);
+      if (ring.length > 60) ring.shift();
+      if (probing) {
+        const m = /^\s*V[A-Z.]{5}\s+(\S+)/.exec(ev.message);
+        if (m) encs.add(m[1]);
+      }
+      const n = C.parseFrameCount(ev.message);
+      if (n !== null) lastFrame = n;
+    });
+    say('loading ffmpeg core from unpkg…');
+    const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+    await ff.load({
+      coreURL: await toBlobURL(base + '/ffmpeg-core.js', 'text/javascript'),
+      wasmURL: await toBlobURL(base + '/ffmpeg-core.wasm', 'application/wasm'),
+    });
+    say('core loaded.');
+
+    // encoder probe — same approach as app.js (dedicated sink)
+    probing = true;
+    await ff.exec(['-hide_banner', '-encoders']);
+    probing = false;
+    say('probe: prores_ks=' + encs.has('prores_ks') + ' libx264=' + encs.has('libx264') + ' (total ' + encs.size + ' video encoders)');
+
+    await ff.createDir('/in');
+    await ff.mount('WORKERFS', { files }, '/in');
+    say('WORKERFS mounted. encoding ProRes LT…');
+    const args = C.buildFFmpegArgs({ codecId: 'prores-lt', fpsNum: 60000, fpsDen: 1001, ext: 'bmp', outName: '/out.mov' });
+    const t0 = performance.now();
+    const ret = await ff.exec(args);
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    say('exec returned ' + ret + ' in ' + secs + 's; last frame= ' + lastFrame);
+    if (ret !== 0) throw new Error('exec failed, log tail:\n' + ring.slice(-15).join('\n'));
+    const data = await ff.readFile('/out.mov');
+    say('output: ' + data.byteLength + ' bytes');
+    const okSig = data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70; // 'ftyp'
+    const verdict = 'EXPORTRESULT_' + ((ret === 0 && lastFrame === 10 && data.byteLength > 100000 && okSig) ? 'OK' : 'BAD') +
+        '_frames-' + lastFrame + '-of-10_bytes-' + data.byteLength + '_ftyp-' + okSig +
+        '_prores-' + encs.has('prores_ks') + '_x264-' + encs.has('libx264') + '_secs-' + secs;
+    say(verdict);
+    document.title = 'DONE';
+    fetch('/' + verdict).catch(() => {}); // beacon: lands in the http.server log
+  } catch (e) {
+    const msg = 'EXPORTRESULT_ERROR_' + encodeURIComponent(String(e && e.message ? e.message : e)).slice(0, 300);
+    say(msg);
+    document.title = 'DONE';
+    fetch('/' + msg).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

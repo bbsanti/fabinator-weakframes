@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>core.js tests</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<script src="core.js"></script>
+<script>
+(function () {
+  'use strict';
+  const C = window.FabCore;
+  const results = [];
+  let failures = 0;
+
+  function eq(actual, expected, label) {
+    const a = JSON.stringify(actual), e = JSON.stringify(expected);
+    if (a === e) { results.push('PASS  ' + label); }
+    else { failures++; results.push('FAIL  ' + label + '\n      expected ' + e + '\n      got      ' + a); }
+  }
+  function ok(cond, label) { eq(!!cond, true, label); }
+
+  // ---------------- classifyName ----------------
+  eq(C.classifyName('0.bmp'), { kind: 'plain', id: 0, idRaw: '0', ext: 'bmp' }, 'plain 0.bmp');
+  eq(C.classifyName('0012.PNG'), { kind: 'plain', id: 12, idRaw: '0012', ext: 'png' }, 'plain 0012.PNG (case+pad)');
+  eq(C.classifyName('segmneted_7.bmp').kind, 'seg', 'seg misspelled prefix');
+  eq(C.classifyName('segmneted_7.bmp').id, 7, 'seg id');
+  eq(C.classifyName('segmented_7.bmp').kind, 'seg', 'seg correct spelling');
+  eq(C.classifyName('7_segmneted.bmp').kind, 'seg', 'seg suffix form');
+  eq(C.classifyName('7-segmented.jpg').kind, 'seg', 'seg suffix hyphen jpg');
+  eq(C.classifyName('SEGMNETED_3.BMP').kind, 'seg', 'seg uppercase');
+  eq(C.classifyName('Thumbs.db'), null, 'Thumbs.db ignored');
+  eq(C.classifyName('frame_1.bmp'), null, 'frame_1.bmp ignored');
+  eq(C.classifyName('7.mov'), null, 'non-image ext ignored');
+  eq(C.classifyName('segmneted_.bmp'), null, 'seg without id ignored');
+  eq(C.classifyName('1.2.bmp'), null, 'dotted name ignored');
+
+  // ---------------- buildPairs ----------------
+  let r = C.buildPairs([
+    { relDir: 'A', name: '0.bmp' }, { relDir: 'A', name: 'segmneted_0.bmp' },
+    { relDir: 'A', name: '1.bmp' },
+    { relDir: 'A', name: 'segmneted_2.bmp' },
+    { relDir: 'B', name: '5.bmp' }, { relDir: 'B', name: 'segmented_5.png' },
+    { relDir: 'A', name: 'notes.txt' },
+  ]);
+  eq(r.pairs.length, 2, 'two pairs found');
+  eq(r.pairs[0], { relDir: 'A', id: 0, plainName: '0.bmp', segName: 'segmneted_0.bmp', ext: 'bmp' }, 'pair A/0');
+  eq(r.pairs[1].segName, 'segmented_5.png', 'extension-agnostic pair (bmp+png)');
+  eq(r.unpairedPlain.length, 1, 'one unpaired plain');
+  eq(r.unpairedPlain[0].name, '1.bmp', 'unpaired plain is 1.bmp');
+  eq(r.unpairedSeg.length, 1, 'one unpaired seg');
+  eq(r.ignored, 1, 'notes.txt ignored');
+
+  // same id in different dirs must NOT pair
+  r = C.buildPairs([
+    { relDir: 'A', name: '3.bmp' },
+    { relDir: 'B', name: 'segmneted_3.bmp' },
+  ]);
+  eq(r.pairs.length, 0, 'no cross-directory pairing');
+  eq(r.unpairedPlain.length, 1, 'cross-dir: plain unpaired');
+  eq(r.unpairedSeg.length, 1, 'cross-dir: seg unpaired');
+
+  // duplicate numeric id -> conflict, no pair
+  r = C.buildPairs([
+    { relDir: '', name: '7.bmp' }, { relDir: '', name: '007.png' },
+    { relDir: '', name: 'segmneted_7.bmp' },
+  ]);
+  eq(r.pairs.length, 0, 'duplicate-id conflict blocks pairing');
+  eq(r.conflicts.length, 1, 'conflict recorded');
+  eq(r.conflicts[0].kind, 'duplicate-original', 'conflict kind');
+
+  // multiple segs, same-ext preferred
+  r = C.buildPairs([
+    { relDir: '', name: '4.png' },
+    { relDir: '', name: 'segmneted_4.bmp' }, { relDir: '', name: 'segmneted_4.png' },
+  ]);
+  eq(r.pairs[0].segName, 'segmneted_4.png', 'same-ext seg preferred');
+  eq(r.conflicts[0].kind, 'extra-segmented', 'extra seg flagged');
+
+  // ---------------- sorting ----------------
+  r = C.buildPairs([
+    { relDir: 'dir10', name: '0.bmp' }, { relDir: 'dir10', name: 'segmneted_0.bmp' },
+    { relDir: 'dir2', name: '0.bmp' }, { relDir: 'dir2', name: 'segmneted_0.bmp' },
+    { relDir: 'dir2', name: '10.bmp' }, { relDir: 'dir2', name: 'segmneted_10.bmp' },
+    { relDir: 'dir2', name: '2.bmp' }, { relDir: 'dir2', name: 'segmneted_2.bmp' },
+  ]);
+  eq(r.pairs.map(p => p.relDir + '#' + p.id), ['dir2#0', 'dir2#2', 'dir2#10', 'dir10#0'], 'natural dir order + numeric id order');
+
+  ok(C.naturalCompare('a2', 'a10') < 0, 'naturalCompare a2 < a10');
+  ok(C.naturalCompare('B', 'a') > 0, 'naturalCompare case-insensitive');
+  eq(C.naturalCompare('x1', 'x1'), 0, 'naturalCompare equal');
+
+  // ---------------- names/args ----------------
+  eq(C.seqName(3, 'bmp'), 'frame_000003.bmp', 'seqName pads to 6');
+  eq(C.seqName(123456, 'png'), 'frame_123456.png', 'seqName six digits');
+  eq(C.sanitizeName('SUMMERLEAGUE WEAKFRAMES!'), 'SUMMERLEAGUE_WEAKFRAMES', 'sanitizeName');
+
+  const args = C.buildFFmpegArgs({ codecId: 'prores-lt', fpsNum: 60000, fpsDen: 1001, ext: 'bmp', outName: '/out.mov' });
+  eq(args, ['-y', '-f', 'image2', '-framerate', '60000/1001', '-start_number', '0', '-i', '/in/frame_%06d.bmp',
+    '-fps_mode', 'passthrough',
+    '-c:v', 'prores_ks', '-profile:v', '1', '-vendor', 'apl0', '-pix_fmt', 'yuv422p10le',
+    '-bsf:v', 'prores_metadata=color_primaries=bt709:color_trc=bt709:colorspace=bt709',
+    '/out.mov'], 'prores-lt args exact');
+  eq(C.buildFFmpegArgs({ codecId: 'prores-proxy', fpsNum: 30, fpsDen: 1, ext: 'bmp', outName: '/o.mov' })[14], '0', 'proxy profile 0');
+  ok(C.buildFFmpegArgs({ codecId: 'h264', fpsNum: 60000, fpsDen: 1001, ext: 'bmp', outName: '/o.mp4' }).includes('libx264'), 'h264 uses libx264');
+
+  // seqName consistency with the %06d pattern in args
+  ok(args[8] === '/in/frame_%06d.bmp' && C.seqName(0, 'bmp') === 'frame_000000.bmp', 'pattern matches seqName');
+
+  // ---------------- header parsers ----------------
+  // BMP: 'BM' + ... width(int32 LE @18)=1920 height(@22)=1080
+  const bmp = new Uint8Array(64);
+  bmp[0] = 0x42; bmp[1] = 0x4D;
+  new DataView(bmp.buffer).setUint32(14, 40, true); // BITMAPINFOHEADER
+  new DataView(bmp.buffer).setInt32(18, 1920, true);
+  new DataView(bmp.buffer).setInt32(22, -1080, true); // top-down (negative)
+  eq(C.imageSize(bmp, 'bmp'), { w: 1920, h: 1080 }, 'BMP size incl. negative height');
+
+  // OS/2 BITMAPCOREHEADER: uint16 width/height at 18/20
+  const bmp2 = new Uint8Array(26);
+  bmp2[0] = 0x42; bmp2[1] = 0x4D;
+  new DataView(bmp2.buffer).setUint32(14, 12, true);
+  new DataView(bmp2.buffer).setUint16(18, 640, true);
+  new DataView(bmp2.buffer).setUint16(20, 480, true);
+  eq(C.imageSize(bmp2, 'bmp'), { w: 640, h: 480 }, 'OS/2 core-header BMP size');
+
+  const png = new Uint8Array(32);
+  [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A].forEach((b, i) => png[i] = b);
+  png[12] = 0x49; png[13] = 0x48; png[14] = 0x44; png[15] = 0x52; // IHDR
+  new DataView(png.buffer).setUint32(16, 1280, false);
+  new DataView(png.buffer).setUint32(20, 720, false);
+  eq(C.imageSize(png, 'png'), { w: 1280, h: 720 }, 'PNG size');
+
+  // JPEG: SOI + APP0(len 4) + SOF0
+  const jpg = new Uint8Array([
+    0xFF, 0xD8,
+    0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00,          // APP0, len 4
+    0xFF, 0xC0, 0x00, 0x11, 0x08, 0x04, 0x38, 0x07, 0x80, // SOF0: h=0x0438=1080 w=0x0780=1920
+    0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+  ]);
+  eq(C.imageSize(jpg, 'jpg'), { w: 1920, h: 1080 }, 'JPEG size via SOF0');
+  eq(C.imageSize(new Uint8Array([0, 1, 2]), 'bmp'), null, 'garbage bmp -> null');
+  eq(C.imageSize(bmp, 'tif'), null, 'tif skipped');
+
+  // ---------------- log parsing ----------------
+  eq(C.parseFrameCount('frame=  247 fps= 13 q=-0.0 Lsize=  108367kB'), 247, 'parse frame count padded');
+  eq(C.parseFrameCount('frame=3 fps=0.0'), 3, 'parse frame count tight');
+  eq(C.parseFrameCount('random line'), null, 'no frame count -> null');
+
+  // ---------------- report ----------------
+  const summary = (failures ? 'FAILURES: ' + failures : 'ALL PASS') + ' (' + results.length + ' assertions)';
+  document.getElementById('out').textContent = 'TESTRESULT: ' + summary + '\n' + results.join('\n');
+  document.title = failures ? 'FAIL' : 'PASS';
+})();
+</script>
+</body>
+</html>

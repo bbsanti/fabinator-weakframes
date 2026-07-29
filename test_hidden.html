@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>hidden attr test</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<div class="viewer-empty" hidden>x</div>
+<span class="chip" hidden>x</span>
+<button class="btn" hidden>x</button>
+<label class="ovl-wrap" hidden>x</label>
+<div class="banner" hidden>x</div>
+<pre id="out">RUNNING</pre>
+<script>
+  const bad = [];
+  document.querySelectorAll('[hidden]').forEach((el) => {
+    if (getComputedStyle(el).display !== 'none') bad.push(el.className || el.tagName);
+  });
+  document.getElementById('out').textContent =
+    'HIDDENTEST: ' + (bad.length ? 'FAIL still visible: ' + bad.join(', ') : 'ALL HIDDEN OK');
+</script>
+</body>
+</html>

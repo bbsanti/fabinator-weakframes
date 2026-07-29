@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Fabinator WeakFrames — Review &amp; Export</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="logo">🎬</span>
+    <div>
+      <h1>Fabinator WeakFrames</h1>
+      <p class="sub">Review weak frames → build a Fabinator-ready video · everything runs locally in your browser</p>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="welcome" role="tab">1 · Review + Export for Fabinator</button>
+    <button class="tab" data-tab="review" role="tab">2 · Frame Review</button>
+    <button class="tab" data-tab="export" role="tab">3 · Video for Fabinator</button>
+  </nav>
+</header>
+
+<div id="globalBanner" class="banner warn" hidden></div>
+
+<main>
+
+  <!-- ============================== TAB 1 : WELCOME ============================== -->
+  <section id="tab-welcome" class="tabpane active">
+    <div class="welcome-grid">
+      <div class="card hero">
+        <h2>What this app is for</h2>
+        <p>This app is used to <b>review weak frames</b> — frames where the segmentation model struggled —
+           and put the keepers <b>into a video to be used in the Fabinator</b>.</p>
+        <p>Frames are reviewed as pairs: the original frame (<span class="mono">0.bmp</span>) and its annotated
+           counterpart (<span class="mono">segmneted_0.bmp</span>). You judge each pair, throw out the weak ones
+           that won't help, and export the survivors as a frame-exact video.</p>
+        <p class="dim">Your images never leave this machine. Files are read and written directly on your disk,
+           and the video is encoded in-browser with FFmpeg (WebAssembly).</p>
+      </div>
+
+      <div class="card good">
+        <h2>✅ A good weak frame…</h2>
+        <ul>
+          <li>has <b>all elements clearly visible</b></li>
+          <li>has <b>errors in the annotation</b> that show where the model fails</li>
+          <li>is <b>varied</b> from the other weak frames before and after it</li>
+        </ul>
+      </div>
+
+      <div class="card bad">
+        <h2>🚫 A bad weak frame…</h2>
+        <ul>
+          <li>is <b>blurry</b> to the point limbs, balls, and other objects aren't clearly delineated</li>
+          <li>has many <b>elements that aren't relevant</b> to the model (like camera angles we don't augment on)</li>
+          <li>is <b>very similar to the frames around it</b> and won't help the model generalize</li>
+        </ul>
+      </div>
+
+      <div class="card steps">
+        <h2>How to use it</h2>
+        <ol>
+          <li><b>Frame Review</b> — open your frames folder (subfolders are scanned automatically).
+              The app finds every <span class="mono">#.&lt;ext&gt;</span> + <span class="mono">segmneted_#.&lt;ext&gt;</span> pair.</li>
+          <li>Step through with the keyboard, toggling original ⇄ segmented to spot where the model fails.
+              Mark rejects — they move to a <span class="mono">to_delete</span> folder first, so nothing is gone
+              until you explicitly hit <i>Delete selected permanently</i>. Undo works the whole time.</li>
+          <li><b>Video for Fabinator</b> — export the surviving frames as ProRes 422 LT
+              at 59.94&nbsp;fps (or ProRes Proxy / H.264). Every frame goes in exactly once: no interpolation,
+              no scaling, no duplicates.</li>
+        </ol>
+        <p><button class="btn primary" data-goto="review">Start reviewing →</button></p>
+      </div>
+
+      <div class="card">
+        <h2>Requirements</h2>
+        <ul class="reqs">
+          <li><b>Chrome or Edge</b> on desktop — the folder access API is not in Firefox/Safari.</li>
+          <li>First export downloads the FFmpeg engine once (~31&nbsp;MB), then it's cached.</li>
+          <li>Works from a web URL (e.g. GitHub Pages) or a local server — processing is always local.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== TAB 2 : FRAME REVIEW ============================== -->
+  <section id="tab-review" class="tabpane">
+    <div class="toolbar">
+      <button id="btnOpen" class="btn primary">📂 Open frames folder…</button>
+      <span id="rootChip" class="chip" hidden></span>
+      <button id="btnRescan" class="btn ghost" hidden>⟳ Rescan</button>
+      <span class="spacer"></span>
+      <span id="statsChips"></span>
+    </div>
+
+    <div class="review-layout">
+      <div class="viewer-col">
+        <div class="viewer" id="viewer">
+          <img id="imgOrig" alt="original frame" draggable="false">
+          <img id="imgSeg" alt="segmented frame" draggable="false" style="display:none">
+          <div class="viewer-empty" id="viewerEmpty">Open a folder to begin…</div>
+          <div class="viewer-hud" id="hudView">ORIGINAL</div>
+          <div class="viewer-hud right" id="hudIdx"></div>
+        </div>
+        <div class="pairinfo" id="pairInfo"><span class="dim">—</span></div>
+        <div class="controls">
+          <button id="btnPrev" class="btn" title="Previous active pair (←)">← Prev</button>
+          <button id="btnNext" class="btn" title="Next active pair (→)">Next →</button>
+          <button id="btnToggle" class="btn" title="Toggle original / segmented (Space)">⇄ Toggle <kbd>Space</kbd></button>
+          <button id="btnOverlay" class="btn" title="Overlay segmented on original (O)">◧ Overlay <kbd>O</kbd></button>
+          <label id="ovlWrap" class="ovl-wrap" hidden>opacity
+            <input type="range" id="ovlOpacity" min="15" max="100" value="100">
+          </label>
+          <span class="spacer"></span>
+          <button id="btnTrash" class="btn danger" title="Move this pair to to_delete (D / X / Del)">🗑 Mark for deletion <kbd>D</kbd></button>
+          <button id="btnUndo" class="btn" title="Undo last mark (Z)">↩ Undo <kbd>Z</kbd></button>
+        </div>
+      </div>
+
+      <aside class="side-col">
+        <div class="card">
+          <h3>to_delete</h3>
+          <p id="trashSummary">empty</p>
+          <div class="row">
+            <button id="btnRestoreAll" class="btn ghost" disabled>Restore all</button>
+            <button id="btnPurge" class="btn danger" disabled>Delete selected permanently…</button>
+          </div>
+          <p class="dim small">Marked files are only <i>staged</i> here. Nothing is deleted until you confirm above.</p>
+        </div>
+
+        <div class="card">
+          <h3>Unpaired files</h3>
+          <div id="unpairedBody"><span class="dim">—</span></div>
+          <button id="btnTrashUnpaired" class="btn ghost" hidden></button>
+        </div>
+
+        <div class="card pairs-card">
+          <h3>Pairs</h3>
+          <div id="pairList" class="pairlist"></div>
+        </div>
+
+        <div class="card keys">
+          <h3>Keyboard</h3>
+          <table>
+            <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>previous / next pair (skips deleted)</td></tr>
+            <tr><td><kbd>Space</kbd></td><td>toggle original ⇄ segmented</td></tr>
+            <tr><td><kbd>O</kbd></td><td>overlay segmented on original</td></tr>
+            <tr><td><kbd>D</kbd> <kbd>X</kbd> <kbd>Del</kbd></td><td>mark pair for deletion</td></tr>
+            <tr><td><kbd>Z</kbd></td><td>undo</td></tr>
+            <tr><td><kbd>R</kbd></td><td>restore the viewed pair from to_delete</td></tr>
+            <tr><td><kbd>Home</kbd> <kbd>End</kbd></td><td>first / last pair</td></tr>
+          </table>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============================== TAB 3 : VIDEO FOR FABINATOR ============================== -->
+  <section id="tab-export" class="tabpane">
+    <div class="export-grid">
+      <div class="card">
+        <h3>Source frames <button id="btnRefreshSrc" class="btn ghost small-btn" title="Recount">⟳</button></h3>
+        <div id="srcSummary"><p>No frames loaded yet.</p></div>
+        <label class="chk"><input type="checkbox" id="chkUnpaired"> include originals that have no segmented partner</label>
+        <p class="dim small">Frames come from your review in the <b>Frame Review</b> tab — every pair not marked
+           for deletion, ordered by folder, then frame number. Each image becomes exactly one video frame.</p>
+      </div>
+
+      <div class="card">
+        <h3>Format</h3>
+        <div id="codecCards" class="codec-cards" role="radiogroup"></div>
+        <div class="row wrap">
+          <label>Frame rate
+            <select id="fpsSel"></select>
+          </label>
+          <label>Output name
+            <span id="namePreview" class="mono chip"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>FFmpeg engine</h3>
+        <p><span id="engineStatus" class="chip">Engine idle</span> <span id="encoderChips"></span></p>
+        <div class="row">
+          <button id="btnPreload" class="btn ghost">Preload engine</button>
+        </div>
+        <p class="dim small">FFmpeg runs as WebAssembly inside this page — nothing to install, nothing uploaded.
+           The core (~31&nbsp;MB) downloads once and is cached by the browser.</p>
+      </div>
+
+      <div class="card">
+        <h3>Export</h3>
+        <div class="row">
+          <button id="btnExport" class="btn primary big" disabled>🎬 Choose destination &amp; export</button>
+          <button id="btnCancel" class="btn danger" hidden>✖ Cancel</button>
+        </div>
+        <p class="dim small">The save dialog opens inside your frames folder — hop <b>up one level</b> for its parent
+           folder (browsers can't pre-select a folder they weren't given access to).</p>
+        <div id="exportProgress" hidden>
+          <div class="progress"><i id="progBar"></i></div>
+          <p id="progText" class="dim"></p>
+        </div>
+        <div id="exportResult" class="banner" hidden></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="modalRoot" hidden></div>
+<div id="toast" hidden></div>
+
+<script src="lib/ffmpeg/ffmpeg.js" defer></script>
+<script src="lib/ffmpeg/util.js" defer></script>
+<script src="core.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
