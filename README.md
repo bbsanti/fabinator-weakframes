@@ -101,9 +101,11 @@ frames you may approach the browser's 2 GB WASM memory ceiling for the output bu
 split very large exports.
 
 You'll get an in-page banner **and a desktop notification** (if you allow it) when the export
-finishes. The banner shows where the file landed and has an **Open export folder…** button —
-it opens a file dialog at that location (web pages aren't allowed to open Explorer or reveal
-absolute paths, so a dialog is the closest the browser sandbox permits).
+finishes. The banner prints the exported file's location as **copy-pasteable text** with a Copy
+button. Browsers never reveal absolute paths, so by default that path is relative to your frames
+folder — paste the frames folder's full path once into the **Frames folder full path** box
+(remembered per folder) and exports print a complete path you can drop straight into Explorer's
+address bar.
 
 ## Development
 

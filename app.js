@@ -761,6 +761,12 @@
   }
 
   function refreshSource() {
+    // prefill the remembered full path for this frames folder (per-folder, localStorage)
+    const bp = $('#basePath');
+    if (bp && S.rootName && bp.dataset.root !== S.rootName) {
+      try { bp.value = localStorage.getItem('fabinator.basePath.' + S.rootName) || ''; } catch (e) { /* storage unavailable */ }
+      bp.dataset.root = S.rootName;
+    }
     const el = $('#srcSummary');
     if (!S.root) {
       el.innerHTML = '<p>No frames loaded yet.</p><button class="btn primary" id="btnGoReview">Open a folder in Frame Review →</button>';
@@ -1088,17 +1094,21 @@
       const where = savedInRoot ? ' (saved into ' + esc(S.rootName) + '/ — save dialog unavailable)' : '';
       const unknownNote = (pf.unknown && pf.unknown.length)
         ? '<br><span class="dim small">' + pf.unknown.length + ' frame(s) had unparseable headers — dimension preflight skipped them.</span>' : '';
-      // locate the export relative to the frames folder (browsers never expose absolute paths)
-      let locLine = '';
-      try {
-        const rel = await S.root.resolve(saveHandle);
-        locLine = (rel && rel.length)
-          ? '<br>📂 Saved in <span class="mono">' + esc([S.rootName].concat(rel.slice(0, -1)).join(' / ') + ' /') + '</span> '
-          : '<br>📂 Saved at the location you picked in the save dialog ';
-      } catch (e) { locLine = '<br>'; }
-      if (window.showOpenFilePicker) {
-        locLine += '<button class="btn small-btn" id="btnReveal">📂 Open export folder…</button> ' +
-          '<span class="dim small">(opens a file dialog at that location — web pages can\'t open Explorer directly)</span>';
+      // print the exported file's location as copy-pasteable text.
+      // Browsers never expose absolute paths, so the full path is composed from the
+      // user-supplied "frames folder full path" when available (relative otherwise).
+      let rel = null;
+      try { rel = await S.root.resolve(saveHandle); } catch (e) { /* saved outside the picked tree */ }
+      const baseRaw = ($('#basePath').value || '').trim().replace(/[\\/]+$/, '');
+      let locLine;
+      if (rel && rel.length) {
+        const sep = baseRaw && baseRaw.includes('/') && !baseRaw.includes('\\') ? '/' : '\\';
+        const full = (baseRaw ? [baseRaw] : [S.rootName]).concat(rel).join(sep);
+        locLine = '<div class="path-row"><input readonly class="path-out" id="exportPath" value="' + esc(full) + '" spellcheck="false">' +
+          '<button class="btn small-btn" id="btnCopyPath">⧉ Copy</button></div>' +
+          (baseRaw ? '' : '<span class="dim small">Path is relative to your frames folder — fill in “Frames folder full path” above and it becomes a complete path you can paste into Explorer.</span>');
+      } else {
+        locLine = '<br><span class="dim small">📂 Saved outside the frames folder — the browser can\'t see that location\'s path; it\'s wherever you pointed the save dialog.</span>';
       }
       showResult(
         '✅ <b>Export complete</b> — ' + list.length + ' frames → <span class="mono">' + esc(saveHandle.name) + '</span> (' +
@@ -1108,12 +1118,14 @@
           : '<span class="warn-text">⚠ Encoder reported ' + S.lastFrameSeen + ' frames, expected ' + list.length + ' — inspect the file.</span>') +
         unknownNote + locLine,
         'ok');
-      const rv = $('#btnReveal');
-      if (rv) {
-        rv.onclick = async () => {
-          try {
-            await window.showOpenFilePicker({ startIn: saveHandle }); // opens in the export file's folder
-          } catch (e) { /* dialog dismissed — nothing to do */ }
+      const cp = $('#btnCopyPath');
+      if (cp) {
+        cp.onclick = () => {
+          const inp = $('#exportPath');
+          navigator.clipboard.writeText(inp.value).then(
+            () => toast('Path copied'),
+            () => { inp.focus(); inp.select(); toast('Press Ctrl+C to copy'); }
+          );
         };
       }
       notifyDone(saveHandle.name + ' — ' + list.length + ' frames, ' + fmtBytes(data.byteLength));
@@ -1175,6 +1187,10 @@
     $('#fpsSel').addEventListener('change', updateNamePreview);
     $('#chkUnpaired').addEventListener('change', refreshSource);
     $('#btnRefreshSrc').addEventListener('click', refreshSource);
+    $('#basePath').addEventListener('change', () => {
+      if (!S.rootName) return;
+      try { localStorage.setItem('fabinator.basePath.' + S.rootName, $('#basePath').value.trim()); } catch (e) { /* storage unavailable */ }
+    });
     $('#btnExport').addEventListener('click', runExport);
     $('#btnCancel').addEventListener('click', cancelExport);
     $('#btnPreload').addEventListener('click', () => loadEngine().catch((e) => toast(e.message, 5000)));
